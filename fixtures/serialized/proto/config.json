@@ -1,0 +1,49 @@
+{
+    "dataset_reader": {
+        "type": "unsupervised_translation"
+    },
+    "iterator": {
+        "type": "homogeneous_batches",
+        "batch_size": 2,
+        "type_field_name": "lang_pair"
+    },
+    "model": {
+        "dataset_reader": {
+            "type": "unsupervised_translation"
+        },
+        "type": "unsupervised_translation",
+        "encoder": {
+            "type": "lstm",
+            "bidirectional": true,
+            "hidden_size": 300,
+            "input_size": 300
+        },
+        "max_decoding_steps": 10,
+        "source_embedder": {
+            "token_embedders": {
+                "tokens": {
+                    "type": "embedding",
+                    "embedding_dim": 300
+                }
+            }
+        }
+    },
+    "train_data_path": {
+        "en": "fixtures/data/mono.en",
+        "en-ru": "fixtures/data/para.en-ru",
+        "ru": "fixtures/data/mono.ru"
+    },
+    "validation_data_path": {
+        "en-ru": "fixtures/data/para.en-ru"
+    },
+    "trainer": {
+        "cuda_device": -1,
+        "num_epochs": 130,
+        "optimizer": {
+            "type": "adam",
+            "lr": "0.1"
+        },
+        "patience": 10,
+        "validation_metric": "+BLEU"
+    }
+}

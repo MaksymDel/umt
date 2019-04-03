@@ -1,0 +1,46 @@
+0it [00:00, ?it/s]
+12it [00:00, 6431.34it/s]
+
+0it [00:00, ?it/s]
+12it [00:00, 9487.59it/s]
+
+0it [00:00, ?it/s]
+24it [00:00, 81973.37it/s]
+
+  0%|          | 0/6 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/home/maksym/anaconda3/envs/inter/bin/allennlp", line 10, in <module>
+    sys.exit(run())
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/run.py", line 18, in run
+    main(prog="allennlp")
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/__init__.py", line 101, in main
+    args.func(args)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 103, in train_model_from_args
+    args.force)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 136, in train_model_from_file
+    return train_model(params, serialization_dir, file_friendly_logging, recover, force)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 204, in train_model
+    metrics = trainer.train()
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/training/trainer.py", line 465, in train
+    train_metrics = self._train_epoch(epoch)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/training/trainer.py", line 306, in _train_epoch
+    loss = self.batch_loss(batch_group, for_training=True)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/training/trainer.py", line 247, in batch_loss
+    output_dict = self.model(**batch)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "./unsupervised_translation/models/unsupervised_translation.py", line 207, in forward
+    state = self._encode(source_tokens)
+  File "./unsupervised_translation/models/unsupervised_translation.py", line 317, in _encode
+    embedded_input = self._source_embedder(source_tokens)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/modules/text_field_embedders/basic_text_field_embedder.py", line 123, in forward
+    token_vectors = embedder(*tensors)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/torch/nn/modules/module.py", line 489, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/modules/token_embedders/embedding.py", line 139, in forward
+    sparse=self.sparse)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/torch/nn/functional.py", line 1454, in embedding
+    return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
+RuntimeError: index out of range at /pytorch/aten/src/TH/generic/THTensorEvenMoreMath.cpp:191

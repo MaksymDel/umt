@@ -1,0 +1,64 @@
+0it [00:00, ?it/s]
+16it [00:00, 6768.42it/s]
+
+0it [00:00, ?it/s]
+4it [00:00, 5141.65it/s]
+
+0it [00:00, ?it/s]
+20it [00:00, 68759.08it/s]
+
+  0%|          | 0/8 [00:00<?, ?it/s]
+loss: 4.5595 ||:  12%|#2        | 1/8 [00:00<00:01,  6.29it/s]
+loss: 17.0208 ||:  38%|###7      | 3/8 [00:00<00:00,  7.16it/s]
+loss: 15.3084 ||:  50%|#####     | 4/8 [00:00<00:00,  7.54it/s]
+loss: 14.0163 ||:  75%|#######5  | 6/8 [00:00<00:00,  8.22it/s]
+loss: 15.2748 ||:  88%|########7 | 7/8 [00:00<00:00,  7.62it/s]
+loss: 15.8279 ||: : 9it [00:01,  7.85it/s]                     
+
+  0%|          | 0/2 [00:00<?, ?it/s]
+BLEU: 0.0000, loss: 0.0000 ||: 100%|##########| 2/2 [00:00<00:00, 19.55it/s]
+
+  0%|          | 0/8 [00:00<?, ?it/s]
+loss: 26.3201 ||:  12%|#2        | 1/8 [00:00<00:01,  6.45it/s]
+loss: 20.9716 ||:  38%|###7      | 3/8 [00:00<00:00,  7.18it/s]
+loss: 20.3236 ||:  50%|#####     | 4/8 [00:00<00:00,  7.23it/s]
+loss: 18.0603 ||:  75%|#######5  | 6/8 [00:00<00:00,  7.58it/s]
+loss: 17.8787 ||:  88%|########7 | 7/8 [00:00<00:00,  6.67it/s]
+loss: 16.4354 ||: 100%|##########| 8/8 [00:01<00:00,  7.02it/s]
+loss: 15.7007 ||: : 9it [00:01,  6.74it/s]                     
+
+  0%|          | 0/2 [00:00<?, ?it/s]
+BLEU: 0.0000, loss: 0.0000 ||: 100%|##########| 2/2 [00:00<00:00, 21.67it/s]
+
+  0%|          | 0/8 [00:00<?, ?it/s]
+loss: 11.1758 ||:  12%|#2        | 1/8 [00:00<00:01,  5.41it/s]
+Traceback (most recent call last):
+  File "/home/maksym/anaconda3/envs/inter/bin/allennlp", line 10, in <module>
+    sys.exit(run())
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/run.py", line 18, in run
+    main(prog="allennlp")
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/__init__.py", line 101, in main
+    args.func(args)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 103, in train_model_from_args
+    args.force)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 136, in train_model_from_file
+    return train_model(params, serialization_dir, file_friendly_logging, recover, force)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 204, in train_model
+    metrics = trainer.train()
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/training/trainer.py", line 465, in train
+    train_metrics = self._train_epoch(epoch)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/training/trainer.py", line 299, in _train_epoch
+    for batch_group in train_generator_tqdm:
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/tqdm/_tqdm.py", line 1022, in __iter__
+    for obj in iterable:
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/common/util.py", line 105, in <lambda>
+    return iter(lambda: list(islice(iterator, 0, group_size)), [])
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/data/iterators/data_iterator.py", line 154, in __call__
+    tensor_dict = batch.as_tensor_dict(padding_lengths)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/data/dataset.py", line 137, in as_tensor_dict
+    for field, tensors in instance.as_tensor_dict(lengths_to_use).items():
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/data/instance.py", line 97, in as_tensor_dict
+    tensors[field_name] = field.as_tensor(padding_lengths[field_name])
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/data/fields/text_field.py", line 136, in as_tensor
+    for indexed_tokens_key in self._indexer_name_to_indexed_token[indexer_name]}
+KeyboardInterrupt
