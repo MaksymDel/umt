@@ -2,6 +2,7 @@ import logging
 import os
 from collections import defaultdict
 from typing import Any, Dict, Iterable, Iterator, List, Set
+import json
 
 import numpy as np
 import torch
@@ -42,26 +43,29 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
 
     @overrides
     def _read(self, file_paths: Dict[str, str]):
-        # add ability for parallel data
-        file_paths = dict(self._parse_file_paths(file_paths)) 
-        
+        if type(file_paths) == str: # if we ese allennlp evaluate, we pass the file paths dict in the form of a string
+            file_paths = json.loads(file_paths)
+        else:
+            file_paths = dict(file_paths)
+
         datasets = {}
         for lang_pair, path in file_paths.items():
             is_mono = False
-            
+
             if len(lang_pair.split('-')) == 1:
                 is_mono = True
-            
+
             if is_mono:
-                lang_pair = lang_pair + "-" + lang_pair # 'en' becomes -> 'en-en' for consistancy. (denoising)                
+                lang_pair = lang_pair + "-" + lang_pair # 'en' becomes -> 'en-en' for consistancy. (denoising)
                 dataset = self._monolingual_dataset_reader._read(path)
             else:
                 dataset = self._parallel_dataset_reader._read(path)
 
-            datasets.update({lang_pair: dataset})                 
+            datasets.update({lang_pair: dataset})
 
         return self._mingler.mingle(datasets=datasets)
-        
+
+
     @overrides
     def text_to_instance(self, string: str, target_lang: str) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
@@ -71,22 +75,14 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
         tokenized_string = self._tokenizer.tokenize(string)
         string_field = TextField(tokenized_string, self._token_indexers)
         return Instance({self._mingler.dataset_name_field: MetadataField(target_lang), 'source_tokens': string_field})
-    
-    def _parse_file_paths(self, file_paths: Dict[str, str]):
+
+    def string_to_instance(self, string: str) -> Instance:
         """
-        Converts from allennlp.params.Params to a python dict.
-        Parameters
-        ----------
-        file_paths :  ``Dict[str, str]``, required.
-            The dictionary of identifier (e.g. "en" for English) to file path.
-        Returns
-        -------
-        A dictionary of identifier ("en","it" etc.) to file path.
+        Used for backtranslation
         """
-        #all_paths = dict(file_paths)
-        #for all_paths 
-        return dict(file_paths)
-    
+        tokenized_string = self._tokenizer.tokenize(string)
+        string_field = TextField(tokenized_string, self._token_indexers)
+        return Instance({'source_tokens': string_field})
 
 #@DatasetReader.register("parallel")
 class ParallelDatasetReader(DatasetReader):

@@ -1,12 +1,13 @@
 local Reader() = {
   "type": "unsupervised_translation"
-};  
+};
 
 {
   "train_data_path": {"en": "fixtures/data/mono.en", "ru": "fixtures/data/mono.ru", "en-ru": "fixtures/data/para.en-ru"},
   "validation_data_path": {"en-ru": "fixtures/data/para.en-ru"},
   "dataset_reader": Reader(),
-    "model": {
+
+  "model": {
       "type": "unsupervised_translation",
       "dataset_reader": Reader(),
       "source_embedder": {
@@ -26,13 +27,14 @@ local Reader() = {
       },
       "max_decoding_steps": 10
     },
+
     "iterator": {
       "type": "homogeneous_batches",
       "type_field_name": "lang_pair",
       "batch_size": 2
     },
     "trainer": {
-      "num_epochs": 130,
+      "num_epochs": 13,
       "patience": 10,
       "cuda_device": -1,
       // "grad_clipping": 5.0,
