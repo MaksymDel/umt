@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 import numpy
 from overrides import overrides
@@ -21,8 +21,12 @@ from allennlp.training.metrics import BLEU
 from allennlp.data.dataset_readers import DatasetReader
 from allennlp.data.dataset import Batch
 
-@Model.register("unsupervised_translation")
-class UnsupevisedTranslation(Model):
+from fairseq.models.transformer import AllennlpTransformerEncoder, TransformerDecoder, TransformerModel
+from fairseq.models.transformer import Embedding as FairseqEmbedding
+from fairseq.models.transformer import base_architecture, transformer_iwslt_de_en
+
+@Model.register("unsupervised_translation_fs")
+class UnsupervisedTranslationFs(Model):
     """
     This ``SimpleSeq2Seq`` class is a :class:`Model` which takes a sequence, encodes it, and then
     uses the encoded representations to decode another sequence.  You can use this as the basis for
@@ -72,23 +76,18 @@ class UnsupevisedTranslation(Model):
 
     def __init__(self,
                  vocab: Vocabulary,
-                 source_embedder: TextFieldEmbedder,
-                 encoder: Seq2SeqEncoder,
-                 max_decoding_steps: int,
                  dataset_reader: DatasetReader,
-                 attention: Attention = None,
-                 attention_function: SimilarityFunction = None,
-                 beam_size: int = None,
+                 source_embedder: TextFieldEmbedder,
                  target_namespace: str = "tokens",
-                 target_embedding_dim: int = None,
-                 scheduled_sampling_ratio: float = 0.,
                  use_bleu: bool = True) -> None:
         super().__init__(vocab)
+
+        self._label_smoothing = 0.1
+        self._padding_index = 0 # this is always true for allennlp
 
         self._reader = dataset_reader
 
         self._target_namespace = target_namespace
-        self._scheduled_sampling_ratio = scheduled_sampling_ratio
 
         # We need the start symbol to provide as the input at the first timestep of decoding, and
         # end symbol as a way to indicate the end of the decoded sequence.
@@ -101,97 +100,58 @@ class UnsupevisedTranslation(Model):
         else:
             self._bleu = None
 
-        # At prediction time, we use a beam search to find the most likely sequence of target tokens.
-        beam_size = beam_size or 1
-        self._max_decoding_steps = max_decoding_steps
-        self._beam_search = BeamSearch(self._end_index, max_steps=max_decoding_steps, beam_size=beam_size)
+        ####################################################
+        ####################################################
+        # DEFINE FAIRSEQ ENCODER, DECODER, AND MODEL:
+        ####################################################
+        ####################################################
+
+
+        # get transformer parameters together
+        class ArgsStub:
+            def __init__(self):
+                pass
+
+        args = ArgsStub()
+        args = transformer_iwslt_de_en(args)
+
+        # build encoder
+        if not hasattr(args, 'max_source_positions'):
+            args.max_source_positions = 1024
+        if not hasattr(args, 'max_target_positions'):
+            args.max_target_positions = 1024
+
 
         # Dense embedding of source vocab tokens.
         self._source_embedder = source_embedder
 
-        # Encodes the sequence of source embeddings into a sequence of hidden states.
-        self._encoder = encoder
-
-        num_classes = self.vocab.get_vocab_size(self._target_namespace)
-
-        # Attention mechanism applied to the encoder output for each step.
-        if attention:
-            if attention_function:
-                raise ConfigurationError("You can only specify an attention module or an "
-                                         "attention function, but not both.")
-            self._attention = attention
-        elif attention_function:
-            self._attention = LegacyAttention(attention_function)
-        else:
-            self._attention = None
-
         # Dense embedding of vocab words in the target space.
-        target_embedding_dim = target_embedding_dim or source_embedder.get_output_dim()
-        self._target_embedder = Embedding(num_classes, target_embedding_dim)
+        num_classes = self.vocab.get_vocab_size(self._target_namespace)
+        args.share_decoder_input_output_embed = False # TODO implement shared embeddings
+        self._target_embedder = Embedding(num_classes, args.decoder_embed_dim)
 
-        # Decoder output dim needs to be the same as the encoder output dim since we initialize the
-        # hidden state of the decoder with the final hidden state of the encoder.
-        self._encoder_output_dim = self._encoder.get_output_dim()
-        self._decoder_output_dim = self._encoder_output_dim
+        # stub for useless dictionary that still has to be passed
+        class DictStub:
+            def  __init__(self, num_classes=None):
+                self._num_classes = num_classes
 
-        if self._attention:
-            # If using attention, a weighted average over encoder outputs will be concatenated
-            # to the previous target embedding to form the input to the decoder at each
-            # time step.
-            self._decoder_input_dim = self._decoder_output_dim + target_embedding_dim
-        else:
-            # Otherwise, the input to the decoder is just the previous target embedding.
-            self._decoder_input_dim = target_embedding_dim
+            def __len__(self):
+                return self._num_classes
 
-        # We'll use an LSTM cell as the recurrent cell that produces a hidden state
-        # for the decoder at each time step.
-        # TODO (pradeep): Do not hardcode decoder cell type.
-        self._decoder_cell = LSTMCell(self._decoder_input_dim, self._decoder_output_dim)
+        src_dict, tgt_dict = DictStub(), DictStub(num_classes=num_classes)
 
-        # We project the hidden state from the decoder into the output vocabulary space
-        # in order to get log probabilities of each target token, at each time step.
-        self._output_projection_layer = Linear(self._decoder_output_dim, num_classes)
+        # instantiate fairseq classes
 
-    def take_step(self,
-                  last_predictions: torch.Tensor,
-                  state: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """
-        Take a decoding step. This is called by the beam search class.
+        emb_golden_tokens = FairseqEmbedding(num_classes, target_embedding_dim, self._padding_index)
 
-        Parameters
-        ----------
-        last_predictions : ``torch.Tensor``
-            A tensor of shape ``(group_size,)``, which gives the indices of the predictions
-            during the last time step.
-        state : ``Dict[str, torch.Tensor]``
-            A dictionary of tensors that contain the current state information
-            needed to predict the next step, which includes the encoder outputs,
-            the source mask, and the decoder hidden state and context. Each of these
-            tensors has shape ``(group_size, *)``, where ``*`` can be any other number
-            of dimensions.
+        self._encoder = AllennlpTransformerEncoder(args, src_dict, self._source_embedder, left_pad=False)
+        self._decoder = TransformerDecoder(args, tgt_dict, emb_golden_tokens, left_pad=False)
+        self._model = TransformerModel(self._encoder, self._decoder)
 
-        Returns
-        -------
-        Tuple[torch.Tensor, Dict[str, torch.Tensor]]
-            A tuple of ``(log_probabilities, updated_state)``, where ``log_probabilities``
-            is a tensor of shape ``(group_size, num_classes)`` containing the predicted
-            log probability of each class for the next step, for each item in the group,
-            while ``updated_state`` is a dictionary of tensors containing the encoder outputs,
-            source mask, and updated decoder hidden state and context.
+        ####################################################
+        ####################################################
+        ####################################################
 
-        Notes
-        -----
-            We treat the inputs as a batch, even though ``group_size`` is not necessarily
-            equal to ``batch_size``, since the group may contain multiple states
-            for each source sentence in the batch.
-        """
-        # shape: (group_size, num_classes)
-        output_projections, state = self._prepare_output_projections(last_predictions, state)
-
-        # shape: (group_size, num_classes)
-        class_log_probabilities = F.log_softmax(output_projections, dim=-1)
-
-        return class_log_probabilities, state
 
     @overrides
     def forward(self,  # type: ignore
@@ -209,13 +169,19 @@ class UnsupevisedTranslation(Model):
         is_validation = not self.training and target_tokens is not None # change 'target_tokens' condition
         is_prediction = not self.training and target_tokens is None # change 'target_tokens' condition
 
+        output_dict = {}
         if is_training:
             is_para = lang_src != lang_tgt
 
             if is_para:
-                state = self._encode(source_tokens)
-                state = self._init_decoder_state(state)
-                output_dict = self._forward_loop(state, target_tokens)
+                encoder_out = self._encoder.forward(source_tokens, None)
+                logits, _ = self._decoder.forward(target_tokens, encoder_out)
+
+                target_mask = util.get_text_field_mask(tokens_B)
+
+                loss = util.sequence_cross_entropy_with_logits(logits, relevant_targets, target_mask,
+                                                label_smoothing=self._label_smoothing)
+                output_dict = {"loss": total_unsupervised_loss}
             else: # we got to learn from unsupervised objectives (denoising + backtransaltion)
                 # 0) learn from denoising
                 state = self._encode(source_tokens)
@@ -328,31 +294,6 @@ class UnsupevisedTranslation(Model):
         output_dict["predicted_tokens"] = all_predicted_tokens
         return output_dict
 
-    def _encode(self, source_tokens: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        # shape: (batch_size, max_input_sequence_length, encoder_input_dim)
-        embedded_input = self._source_embedder(source_tokens)
-        # shape: (batch_size, max_input_sequence_length)
-        source_mask = util.get_text_field_mask(source_tokens)
-        # shape: (batch_size, max_input_sequence_length, encoder_output_dim)
-        encoder_outputs = self._encoder(embedded_input, source_mask)
-        return {
-                "source_mask": source_mask,
-                "encoder_outputs": encoder_outputs,
-        }
-
-    def _init_decoder_state(self, state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        batch_size = state["source_mask"].size(0)
-        # shape: (batch_size, encoder_output_dim)
-        final_encoder_output = util.get_final_encoder_states(
-                state["encoder_outputs"],
-                state["source_mask"],
-                self._encoder.is_bidirectional())
-        # Initialize the decoder hidden state with the final output of the encoder.
-        # shape: (batch_size, decoder_output_dim)
-        state["decoder_hidden"] = final_encoder_output
-        # shape: (batch_size, decoder_output_dim)
-        state["decoder_context"] = state["encoder_outputs"].new_zeros(batch_size, self._decoder_output_dim)
-        return state
 
     def _forward_loop(self,
                       state: Dict[str, torch.Tensor],

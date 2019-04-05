@@ -2,3 +2,5 @@ experiments
 .ipynb_checkpoints
 .vscode
 *__pycache__
+fairseq
+fixtures
