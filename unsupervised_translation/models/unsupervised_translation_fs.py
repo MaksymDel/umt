@@ -141,14 +141,14 @@ class UnsupervisedTranslationFs(Model):
                 self._pad = pad
                 self._unk = unk
                 self._eos = eos
-
-            def pad():
+            
+            def pad(self):
                 return self._pad
-
-            def unk():
+            
+            def unk(self):
                 return self._unk
 
-            def eos():
+            def eos(self):
                 return self._eos
 
             def __len__(self):
@@ -156,7 +156,8 @@ class UnsupervisedTranslationFs(Model):
 
         src_dict, tgt_dict = DictStub(), DictStub(num_tokens=num_classes, 
                                                   pad=self._padding_index, 
-                                                  eos=self.vocab.get_token_index(END_SYMBOL, namespace=self._target_namespace))
+                                                  unk=self._oov_index,
+                                                  eos=self._end_index)
 
         # instantiate fairseq classes
         emb_golden_tokens = FairseqEmbedding(num_classes, args.decoder_embed_dim, self._padding_index)
@@ -165,7 +166,9 @@ class UnsupervisedTranslationFs(Model):
         self._decoder = TransformerDecoder(args, tgt_dict, emb_golden_tokens, left_pad=False)
         self._model = TransformerModel(self._encoder, self._decoder)
 
-        # self._sequence_generator = 
+        self._sequence_generator_greedy = SequenceGenerator(tgt_dict=tgt_dict, beam_size=1, max_len_b=200)
+        self._sequence_generator_beam = SequenceGenerator(tgt_dict=tgt_dict, beam_size=7, max_len_b=200) # TODO: do not hardcode max_len_b and beam size
+
         ####################################################
         ####################################################
         ####################################################
@@ -197,6 +200,9 @@ class UnsupervisedTranslationFs(Model):
                 para_loss = self._get_ce_loss(logits, target_tokens)
 
                 output_dict = {"loss": para_loss}
+
+                res = self._sequence_generator_greedy.generate([self._model], self._prepare_fairseq_batch(source_tokens), bos_token = self._start_index)
+                print(res)
             else: # we got to learn from unsupervised objectives (denoising + backtransaltion)
                 # 0) learn from denoising
                 encoder_out = self._encoder.forward(source_tokens, None)
@@ -281,6 +287,13 @@ class UnsupervisedTranslationFs(Model):
                        "lang_pair": lang_pairs}
 
         return model_input
+
+    def _prepare_fairseq_batch(self, source_tokens: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        padding_mask = util.get_text_field_mask(source_tokens)
+        # source_tokens = source_tokens["tokens"]
+        # source_tokens, padding_mask = remove_eos_from_the_beginning(source_tokens, padding_mask)
+        lengths = util.get_lengths_from_binary_sequence_mask(padding_mask)
+        return {"net_input": {"src_tokens": source_tokens, "src_lengths": lengths}}
 
     @overrides
     def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
