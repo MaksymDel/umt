@@ -1,75 +1,72 @@
 0it [00:00, ?it/s]
-16it [00:00, 3984.14it/s]
+16it [00:00, 5832.51it/s]
 
 0it [00:00, ?it/s]
-4it [00:00, 2995.40it/s]
+4it [00:00, 6170.36it/s]
 
 0it [00:00, ?it/s]
-20it [00:00, 36111.10it/s]
+20it [00:00, 72005.22it/s]
 
   0%|          | 0/8 [00:00<?, ?it/s]
-loss: 9.1191 ||:  12%|#2        | 1/8 [00:00<00:02,  2.75it/s]
-loss: 19.4219 ||:  25%|##5       | 2/8 [00:00<00:01,  4.27it/s]
-loss: 26.7265 ||:  38%|###7      | 3/8 [00:00<00:01,  3.68it/s]
-loss: 27.3650 ||:  50%|#####     | 4/8 [00:01<00:01,  3.73it/s]
-loss: 24.0118 ||:  62%|######2   | 5/8 [00:01<00:00,  4.09it/s]
-loss: 23.5710 ||:  75%|#######5  | 6/8 [00:01<00:00,  3.32it/s]
-loss: 24.3849 ||:  88%|########7 | 7/8 [00:02<00:00,  3.13it/s]
-loss: 25.4945 ||: 100%|##########| 8/8 [00:02<00:00,  3.30it/s]
-loss: 24.3904 ||: : 9it [00:02,  3.31it/s]                     
+loss: 9.1191 ||:  12%|#2        | 1/8 [00:00<00:01,  3.80it/s]
+loss: 26.7265 ||:  38%|###7      | 3/8 [00:00<00:01,  4.54it/s]
+loss: 27.3676 ||:  50%|#####     | 4/8 [00:00<00:00,  4.82it/s]
+loss: 23.6632 ||:  75%|#######5  | 6/8 [00:00<00:00,  5.49it/s]
+loss: 24.5251 ||:  88%|########7 | 7/8 [00:01<00:00,  4.97it/s]
+loss: 23.8001 ||: 100%|##########| 8/8 [00:01<00:00,  5.47it/s]
+loss: 22.8372 ||: : 9it [00:01,  5.17it/s]                     
 
   0%|          | 0/2 [00:00<?, ?it/s]
-BLEU: 0.0000, loss: 0.0000 ||: 100%|##########| 2/2 [00:00<00:00, 21.75it/s]
+BLEU: 0.0000, loss: 0.0000 ||: 100%|##########| 2/2 [00:00<00:00, 26.60it/s]
 
   0%|          | 0/8 [00:00<?, ?it/s]
-loss: 29.3380 ||:  12%|#2        | 1/8 [00:00<00:02,  2.67it/s]
-loss: 20.2483 ||:  25%|##5       | 2/8 [00:00<00:01,  4.17it/s]
-loss: 22.8806 ||:  38%|###7      | 3/8 [00:00<00:01,  4.26it/s]
-loss: 23.4432 ||:  50%|#####     | 4/8 [00:00<00:00,  4.25it/s]
-loss: 20.8636 ||:  62%|######2   | 5/8 [00:01<00:00,  4.77it/s]
+loss: 29.1327 ||:  12%|#2        | 1/8 [00:00<00:01,  4.06it/s]
+loss: 20.6813 ||:  38%|###7      | 3/8 [00:00<00:01,  4.77it/s]
+loss: 23.2324 ||:  50%|#####     | 4/8 [00:00<00:00,  4.90it/s]
+loss: 21.2165 ||:  75%|#######5  | 6/8 [00:00<00:00,  5.45it/s]
+loss: 22.1719 ||:  88%|########7 | 7/8 [00:01<00:00,  4.85it/s]
+loss: 20.9583 ||: 100%|##########| 8/8 [00:01<00:00,  5.25it/s]
+loss: 19.7363 ||: : 9it [00:01,  4.85it/s]                     
+
+  0%|          | 0/2 [00:00<?, ?it/s]
+BLEU: 0.0000, loss: 0.0000 ||: 100%|##########| 2/2 [00:00<00:00, 25.42it/s]
+
+  0%|          | 0/8 [00:00<?, ?it/s]
+loss: 14.5803 ||:  12%|#2        | 1/8 [00:00<00:02,  3.46it/s]
+loss: 9.0709 ||:  38%|###7      | 3/8 [00:00<00:01,  4.07it/s] 
+loss: 9.3617 ||:  50%|#####     | 4/8 [00:00<00:00,  4.23it/s]
+loss: 9.4236 ||:  75%|#######5  | 6/8 [00:01<00:00,  4.72it/s]
+loss: 9.9566 ||:  88%|########7 | 7/8 [00:01<00:00,  4.24it/s]
+loss: 8.9101 ||: 100%|##########| 8/8 [00:01<00:00,  4.61it/s]
 Traceback (most recent call last):
-  File "/home/del/anaconda3/envs/konstrukt/bin/allennlp", line 11, in <module>
+  File "/home/maksym/anaconda3/envs/inter/bin/allennlp", line 10, in <module>
     sys.exit(run())
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/run.py", line 18, in run
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/run.py", line 18, in run
     main(prog="allennlp")
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/commands/__init__.py", line 101, in main
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/__init__.py", line 101, in main
     args.func(args)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/commands/train.py", line 103, in train_model_from_args
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 103, in train_model_from_args
     args.force)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/commands/train.py", line 136, in train_model_from_file
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 136, in train_model_from_file
     return train_model(params, serialization_dir, file_friendly_logging, recover, force)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/commands/train.py", line 204, in train_model
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/commands/train.py", line 204, in train_model
     metrics = trainer.train()
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/training/trainer.py", line 465, in train
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/training/trainer.py", line 465, in train
     train_metrics = self._train_epoch(epoch)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/training/trainer.py", line 306, in _train_epoch
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/training/trainer.py", line 306, in _train_epoch
     loss = self.batch_loss(batch_group, for_training=True)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/training/trainer.py", line 247, in batch_loss
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/allennlp/training/trainer.py", line 247, in batch_loss
     output_dict = self.model(**batch)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/modules/module.py", line 477, in __call__
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/torch/nn/modules/module.py", line 489, in __call__
     result = self.forward(*input, **kwargs)
-  File "./unsupervised_translation/models/unsupervised_translation.py", line 221, in forward
-    state = self._encode(source_tokens)
-  File "./unsupervised_translation/models/unsupervised_translation.py", line 337, in _encode
-    encoder_outputs = self._encoder(embedded_input, source_mask)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/modules/module.py", line 477, in __call__
+  File "./unsupervised_translation/models/unsupervised_translation.py", line 239, in forward
+    bt_output_dict = self._forward_loop(bt_state) # translate in inference greedy mode
+  File "./unsupervised_translation/models/unsupervised_translation.py", line 405, in _forward_loop
+    output_projections, state = self._prepare_output_projections(input_choices, state)
+  File "./unsupervised_translation/models/unsupervised_translation.py", line 492, in _prepare_output_projections
+    (decoder_hidden, decoder_context))
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/torch/nn/modules/module.py", line 489, in __call__
     result = self.forward(*input, **kwargs)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/modules/seq2seq_encoders/pytorch_seq2seq_wrapper.py", line 83, in forward
-    self.sort_and_run_forward(self._module, inputs, mask, hidden_state)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/allennlp/modules/encoder_base.py", line 116, in sort_and_run_forward
-    module_output, final_states = module(packed_sequence_input, initial_states)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/modules/module.py", line 477, in __call__
-    result = self.forward(*input, **kwargs)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/modules/rnn.py", line 192, in forward
-    output, hidden = func(input, self.all_weights, hx, batch_sizes)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/_functions/rnn.py", line 324, in forward
-    return func(input, *fargs, **fkwargs)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/_functions/rnn.py", line 244, in forward
-    nexth, output = func(input, hidden, weight, batch_sizes)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/_functions/rnn.py", line 87, in forward
-    hy, output = inner(input, hidden[l], weight[l], batch_sizes)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/_functions/rnn.py", line 200, in forward
-    hidden = inner(step_input, hidden, *weight)
-  File "/home/del/anaconda3/envs/konstrukt/lib/python3.6/site-packages/torch/nn/_functions/rnn.py", line 34, in LSTMCell
-    gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+  File "/home/maksym/anaconda3/envs/inter/lib/python3.6/site-packages/torch/nn/modules/rnn.py", line 732, in forward
+    self.bias_ih, self.bias_hh,
 KeyboardInterrupt

@@ -21,9 +21,11 @@ from allennlp.training.metrics import BLEU
 from allennlp.data.dataset_readers import DatasetReader
 from allennlp.data.dataset import Batch
 
-from fairseq.models.transformer import AllennlpTransformerEncoder, TransformerDecoder, TransformerModel
+from fairseq.models.transformer import TransformerDecoder, TransformerModel
 from fairseq.models.transformer import Embedding as FairseqEmbedding
 from fairseq.models.transformer import base_architecture, transformer_iwslt_de_en
+
+from unsupervised_translation.modules.fseq_transformer_encoder import AllennlpTransformerEncoder
 
 @Model.register("unsupervised_translation_fs")
 class UnsupervisedTranslationFs(Model):
@@ -113,7 +115,7 @@ class UnsupervisedTranslationFs(Model):
                 pass
 
         args = ArgsStub()
-        args = transformer_iwslt_de_en(args)
+        transformer_iwslt_de_en(args)
 
         # build encoder
         if not hasattr(args, 'max_source_positions'):
@@ -128,21 +130,19 @@ class UnsupervisedTranslationFs(Model):
         # Dense embedding of vocab words in the target space.
         num_classes = self.vocab.get_vocab_size(self._target_namespace)
         args.share_decoder_input_output_embed = False # TODO implement shared embeddings
-        self._target_embedder = Embedding(num_classes, args.decoder_embed_dim)
 
         # stub for useless dictionary that still has to be passed
         class DictStub:
-            def  __init__(self, num_classes=None):
-                self._num_classes = num_classes
+            def  __init__(self, num_tokens=None):
+                self._num_tokens = num_tokens
 
             def __len__(self):
-                return self._num_classes
+                return self._num_tokens
 
-        src_dict, tgt_dict = DictStub(), DictStub(num_classes=num_classes)
+        src_dict, tgt_dict = DictStub(), DictStub(num_tokens=num_classes)
 
         # instantiate fairseq classes
-
-        emb_golden_tokens = FairseqEmbedding(num_classes, target_embedding_dim, self._padding_index)
+        emb_golden_tokens = FairseqEmbedding(num_classes, args.decoder_embed_dim, self._padding_index)
 
         self._encoder = AllennlpTransformerEncoder(args, src_dict, self._source_embedder, left_pad=False)
         self._decoder = TransformerDecoder(args, tgt_dict, emb_golden_tokens, left_pad=False)
@@ -175,19 +175,15 @@ class UnsupervisedTranslationFs(Model):
 
             if is_para:
                 encoder_out = self._encoder.forward(source_tokens, None)
-                logits, _ = self._decoder.forward(target_tokens, encoder_out)
+                logits, _ = self._decoder.forward(target_tokens["tokens"], encoder_out)
+                para_loss = self._get_ce_loss(logits, target_tokens)
 
-                target_mask = util.get_text_field_mask(tokens_B)
-
-                loss = util.sequence_cross_entropy_with_logits(logits, relevant_targets, target_mask,
-                                                label_smoothing=self._label_smoothing)
-                output_dict = {"loss": total_unsupervised_loss}
+                output_dict = {"loss": para_loss}
             else: # we got to learn from unsupervised objectives (denoising + backtransaltion)
                 # 0) learn from denoising
-                state = self._encode(source_tokens)
-                state = self._init_decoder_state(state)
-                output_dict_denoising = self._forward_loop(state, target_tokens)
-                loss_denoising = output_dict_denoising["loss"]
+                encoder_out = self._encoder.forward(source_tokens, None)
+                logits, _ = self._decoder.forward(target_tokens["tokens"], encoder_out)
+                loss_denoising = self._get_ce_loss(logits, target_tokens)
 
                 # 1) learn from backtranslation
                 # 1.1) generate fake source and prepare model input
@@ -237,7 +233,12 @@ class UnsupervisedTranslationFs(Model):
 
         return output_dict
 
-
+    def _get_ce_loss(self, logits, target_tokens):
+        target_mask = util.get_text_field_mask(target_tokens)
+        loss = util.sequence_cross_entropy_with_logits(logits, target_tokens["tokens"], target_mask,
+                                                label_smoothing=self._label_smoothing)
+        return loss
+        
     def _prepare_batch_input(self, source_tokens: List[List[str]], target_tensor_dict: Dict[str, torch.Tensor], lang_pair: str):
         """
         Converts list of sentences which are itself lists of strings into Batch
