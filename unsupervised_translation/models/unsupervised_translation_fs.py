@@ -166,8 +166,8 @@ class UnsupervisedTranslationFs(Model):
         self._decoder = TransformerDecoder(args, tgt_dict, emb_golden_tokens, left_pad=False)
         self._model = TransformerModel(self._encoder, self._decoder)
 
-        self._sequence_generator_greedy = SequenceGenerator(tgt_dict=tgt_dict, beam_size=1, max_len_b=200)
-        self._sequence_generator_beam = SequenceGenerator(tgt_dict=tgt_dict, beam_size=7, max_len_b=200) # TODO: do not hardcode max_len_b and beam size
+        self._sequence_generator_greedy = SequenceGenerator(tgt_dict=tgt_dict, beam_size=1, max_len_b=20)
+        self._sequence_generator_beam = SequenceGenerator(tgt_dict=tgt_dict, beam_size=7, max_len_b=20) # TODO: do not hardcode max_len_b and beam size
 
         ####################################################
         ####################################################
@@ -201,8 +201,9 @@ class UnsupervisedTranslationFs(Model):
 
                 output_dict = {"loss": para_loss}
 
-                res = self._sequence_generator_greedy.generate([self._model], self._prepare_fairseq_batch(source_tokens), bos_token = self._start_index)
-                print(res)
+                predictions = self._sequence_generator_beam.generate([self._model], self._prepare_fairseq_batch(source_tokens), bos_token = self._start_index)
+                output_dict["predictions"] =  predictions
+                print(self.decode(output_dict)["predicted_tokens"])
             else: # we got to learn from unsupervised objectives (denoising + backtransaltion)
                 # 0) learn from denoising
                 encoder_out = self._encoder.forward(source_tokens, None)
@@ -293,7 +294,7 @@ class UnsupervisedTranslationFs(Model):
         # source_tokens = source_tokens["tokens"]
         # source_tokens, padding_mask = remove_eos_from_the_beginning(source_tokens, padding_mask)
         lengths = util.get_lengths_from_binary_sequence_mask(padding_mask)
-        return {"net_input": {"src_tokens": source_tokens, "src_lengths": lengths}}
+        return {"net_input": {"src_tokens": source_tokens, "src_lengths": lengths}} # TODO: length are ignored even in seq generator; omit it here
 
     @overrides
     def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -307,16 +308,34 @@ class UnsupervisedTranslationFs(Model):
         This method trims the output predictions to the first end symbol, replaces indices with
         corresponding tokens, and adds a field called ``predicted_tokens`` to the ``output_dict``.
         """
-        predicted_indices = output_dict["predictions"]
-        if not isinstance(predicted_indices, numpy.ndarray):
-            predicted_indices = predicted_indices.detach().cpu().numpy()
+        predictions = output_dict["predictions"]
+        #print(generator_out)
         all_predicted_tokens = []
+        for hyps in predictions:
+            best_hyp = hyps[0]
+            indices = best_hyp["tokens"]
+
+            if self._end_index in indices:
+                indices = indices[:((indices == self._end_index).nonzero())]
+
+            predicted_tokens = [self.vocab.get_token_from_index(x.item(), namespace=self._target_namespace)
+                                for x in indices]
+
+            all_predicted_tokens.append(predicted_tokens)
+        
+        output_dict["predicted_tokens"] = all_predicted_tokens
+        
+        return output_dict
+
         for indices in predicted_indices:
             # Beam search gives us the top k results for each source sentence in the batch
             # but we just want the single best.
-            if len(indices.shape) > 1:
+            if len(indices) > 1:
                 indices = indices[0]
-            indices = list(indices)
+
+            if not isinstance(indices, list):
+                indices = list(indices)
+
             # Collect indices till the first end_symbol
             if self._end_index in indices:
                 indices = indices[:indices.index(self._end_index)]
