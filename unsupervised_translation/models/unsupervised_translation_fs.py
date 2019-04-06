@@ -9,6 +9,7 @@ from torch.nn.modules.rnn import LSTMCell
 
 from allennlp.common.checks import ConfigurationError
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
+from allennlp.data.vocabulary import DEFAULT_OOV_TOKEN, DEFAULT_PADDING_TOKEN
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules.attention import LegacyAttention
 from allennlp.modules import Attention, TextFieldEmbedder, Seq2SeqEncoder
@@ -24,6 +25,7 @@ from allennlp.data.dataset import Batch
 from fairseq.models.transformer import TransformerDecoder, TransformerModel
 from fairseq.models.transformer import Embedding as FairseqEmbedding
 from fairseq.models.transformer import base_architecture, transformer_iwslt_de_en
+from fairseq.sequence_generator import SequenceGenerator
 
 from unsupervised_translation.modules.fseq_transformer_encoder import AllennlpTransformerEncoder
 
@@ -85,7 +87,12 @@ class UnsupervisedTranslationFs(Model):
         super().__init__(vocab)
 
         self._label_smoothing = 0.1
-        self._padding_index = 0 # this is always true for allennlp
+
+        self._padding_index = vocab.get_token_index(DEFAULT_PADDING_TOKEN, target_namespace) 
+        self._oov_index = vocab.get_token_index(DEFAULT_OOV_TOKEN, target_namespace) 
+        self._pad_index = vocab.get_token_index(vocab._padding_token, target_namespace)  # pylint: disable=protected-access
+        self._start_index = self.vocab.get_token_index(START_SYMBOL, target_namespace)
+        self._end_index = self.vocab.get_token_index(END_SYMBOL, target_namespace)
 
         self._reader = dataset_reader
 
@@ -93,12 +100,8 @@ class UnsupervisedTranslationFs(Model):
 
         # We need the start symbol to provide as the input at the first timestep of decoding, and
         # end symbol as a way to indicate the end of the decoded sequence.
-        self._start_index = self.vocab.get_token_index(START_SYMBOL, self._target_namespace)
-        self._end_index = self.vocab.get_token_index(END_SYMBOL, self._target_namespace)
-
         if use_bleu:
-            pad_index = self.vocab.get_token_index(self.vocab._padding_token, self._target_namespace)  # pylint: disable=protected-access
-            self._bleu = BLEU(exclude_indices={pad_index, self._end_index, self._start_index})
+            self._bleu = BLEU(exclude_indices={self._pad_index, self._end_index, self._start_index})
         else:
             self._bleu = None
 
@@ -133,13 +136,27 @@ class UnsupervisedTranslationFs(Model):
 
         # stub for useless dictionary that still has to be passed
         class DictStub:
-            def  __init__(self, num_tokens=None):
+            def  __init__(self, num_tokens=None, pad=None, unk=None, eos=None):
                 self._num_tokens = num_tokens
+                self._pad = pad
+                self._unk = unk
+                self._eos = eos
+
+            def pad():
+                return self._pad
+
+            def unk():
+                return self._unk
+
+            def eos():
+                return self._eos
 
             def __len__(self):
                 return self._num_tokens
 
-        src_dict, tgt_dict = DictStub(), DictStub(num_tokens=num_classes)
+        src_dict, tgt_dict = DictStub(), DictStub(num_tokens=num_classes, 
+                                                  pad=self._padding_index, 
+                                                  eos=self.vocab.get_token_index(END_SYMBOL, namespace=self._target_namespace))
 
         # instantiate fairseq classes
         emb_golden_tokens = FairseqEmbedding(num_classes, args.decoder_embed_dim, self._padding_index)
@@ -148,6 +165,7 @@ class UnsupervisedTranslationFs(Model):
         self._decoder = TransformerDecoder(args, tgt_dict, emb_golden_tokens, left_pad=False)
         self._model = TransformerModel(self._encoder, self._decoder)
 
+        # self._sequence_generator = 
         ####################################################
         ####################################################
         ####################################################
