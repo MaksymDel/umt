@@ -35,33 +35,37 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
                  token_indexers: Dict[str, TokenIndexer] = None,
                  lazy: bool = False) -> None:
         super().__init__(lazy)
+        self._undefined_lang_id = "xx"
         self._tokenizer = tokenizer or WordTokenizer(word_splitter=SimpleWordSplitter())
         self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
-        self._monolingual_dataset_reader = MonolingualDatasetReader(tokenizer=tokenizer, token_indexers=token_indexers, lazy=lazy)
-        self._parallel_dataset_reader = ParallelDatasetReader(source_tokenizer=tokenizer, source_token_indexers=token_indexers, lazy=lazy)
+        self._denoising_dataset_reader = DenoisingAutoencoderDatasetReader(tokenizer=tokenizer,
+                                                                           token_indexers=token_indexers, lazy=lazy)
+        self._backtranslation_dataset_reader = BacktranslationDatasetReader(tokenizer=tokenizer,
+                                                                            token_indexers=token_indexers, lazy=lazy)
+        self._parallel_dataset_reader = ParallelDatasetReader(source_tokenizer=tokenizer,
+                                                              source_token_indexers=token_indexers, lazy=lazy)
+
         self._mingler = RoundRobinMingler(dataset_name_field="lang_pair", take_at_a_time=1)
 
     @overrides
     def _read(self, file_paths: Dict[str, str]):
-        if type(file_paths) == str: # if we ese allennlp evaluate, we pass the file paths dict in the form of a string
+        if type(file_paths) == str:  # if we ese allennlp evaluate, we pass the file paths dict in the form of a string
             file_paths = json.loads(file_paths)
         else:
             file_paths = dict(file_paths)
 
         datasets = {}
-        for lang_pair, path in file_paths.items():
-            is_mono = False
+        for lang_code, path in file_paths.items():
+            if len(lang_code.split('-')) == 1:
+                lang_pair = lang_code + "-" + lang_code # 'en' becomes -> 'en-en' for consistancy. (denoising)
+                datasets[lang_pair] = self._denoising_dataset_reader._read(path)
 
-            if len(lang_pair.split('-')) == 1:
-                is_mono = True
+                lang_pair = self._undefined_lang_id + "-" + lang_code  # this means backtranslation examples
+                datasets[lang_pair] = self._backtranslation_dataset_reader._read(path)
 
-            if is_mono:
-                lang_pair = lang_pair + "-" + lang_pair # 'en' becomes -> 'en-en' for consistancy. (denoising)
-                dataset = self._monolingual_dataset_reader._read(path)
-            else:
-                dataset = self._parallel_dataset_reader._read(path)
-
-            datasets.update({lang_pair: dataset})
+            elif len(lang_code.split('-')) == 2:
+                lang_pair = lang_code
+                datasets[lang_pair] = self._parallel_dataset_reader._read(path)
 
         return self._mingler.mingle(datasets=datasets)
 
@@ -72,9 +76,10 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
         """
         Used in predicition time
         """
+        lang_pair = self._undefined_lang_id + '-' + target_lang
         tokenized_string = self._tokenizer.tokenize(string)
         string_field = TextField(tokenized_string, self._token_indexers)
-        return Instance({self._mingler.dataset_name_field: MetadataField(target_lang), 'source_tokens': string_field})
+        return Instance({self._mingler.dataset_name_field: MetadataField(lang_pair), 'source_tokens': string_field})
 
     def string_to_instance(self, string: str) -> Instance:
         """
@@ -84,7 +89,7 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
         string_field = TextField(tokenized_string, self._token_indexers)
         return Instance({'source_tokens': string_field})
 
-#@DatasetReader.register("parallel")
+
 class ParallelDatasetReader(DatasetReader):
     """
     """
@@ -129,8 +134,44 @@ class ParallelDatasetReader(DatasetReader):
             return Instance({'source_tokens': source_field})
 
 
-#@DatasetReader.register("monolingual")
-class MonolingualDatasetReader(DatasetReader):
+class DenoisingAutoencoderDatasetReader(DatasetReader):
+    """
+    """
+    def __init__(self,
+                 tokenizer: Tokenizer = None,
+                 token_indexers: Dict[str, TokenIndexer] = None,
+                 lazy: bool = False) -> None:
+        super().__init__(lazy)
+        self._tokenizer = tokenizer or WordTokenizer(word_splitter=SimpleWordSplitter())
+        self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
+
+    @overrides
+    def _read(self, file_path):
+        with open(cached_path(file_path), "r") as data_file:
+            logger.info("Reading instances from lines in file at: %s", file_path)
+            for line_num, line in enumerate(data_file):
+                line = line.strip("\n")
+
+                if not line:
+                    continue
+
+                yield self.text_to_instance(line)
+
+    def _add_noise(self, sentence):
+        # TODO: implement noising
+        return sentence
+
+    @overrides
+    def text_to_instance(self, string: str) -> Instance:  # type: ignore
+        # pylint: disable=arguments-differ
+        tokenized_string = self._tokenizer.tokenize(string)
+        noised_string = self._add_noise(tokenized_string)
+        string_field = TextField(tokenized_string, self._token_indexers)
+        noised_string_filed = TextField(noised_string, self._token_indexers)
+        return Instance({'source_tokens': noised_string_filed, 'target_tokens': string_field})
+
+
+class BacktranslationDatasetReader(DatasetReader):
     """
     """
     def __init__(self,
@@ -158,7 +199,8 @@ class MonolingualDatasetReader(DatasetReader):
         # pylint: disable=arguments-differ
         tokenized_string = self._tokenizer.tokenize(string)
         string_field = TextField(tokenized_string, self._token_indexers)
-        return Instance({'source_tokens': string_field, 'target_tokens': string_field})
+        return Instance({'target_tokens': string_field})
+
 
 class DatasetMingler(Registrable):
     """
@@ -172,7 +214,6 @@ class DatasetMingler(Registrable):
         raise NotImplementedError
 
 
-#@DatasetMingler.register("round-robin")
 class RoundRobinMingler(DatasetMingler):
     """
     Cycle through datasets, ``take_at_time`` instances at a time.

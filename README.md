@@ -1,6 +1,6 @@
 
 Train:
-`allennlp train fixtures/configs/proto_fs.jsonnet -s fixtures/serialized/proto_fs/ --include-package unsupervised_translation -f`
+`allennlp train fixtures/configs/proto.jsonnet -s fixtures/serialized/proto/ --include-package unsupervised_translation -f`
 
 Evaluate:
 `allennlp evaluate fixtures/serialized/proto_fs/model.tar.gz '{"en-ru": "fixtures/data/para.en-ru"}' --include-package unsupervised_translation`
