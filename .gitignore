@@ -5,3 +5,4 @@ experiments
 fairseq
 fixtures
 .idea
+fixtures/serialized
