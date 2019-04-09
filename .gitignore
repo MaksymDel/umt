@@ -3,6 +3,5 @@ experiments
 .vscode
 *__pycache__
 fairseq
-fixtures
 .idea
 fixtures/serialized
