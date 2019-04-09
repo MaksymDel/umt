@@ -1,33 +1,29 @@
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List
 
-import numpy
 from overrides import overrides
 import torch
-import torch.nn.functional as F
-from torch.nn.modules.linear import Linear
-from torch.nn.modules.rnn import LSTMCell
 
 from allennlp.common.checks import ConfigurationError
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 from allennlp.data.vocabulary import DEFAULT_OOV_TOKEN, DEFAULT_PADDING_TOKEN
 from allennlp.data.vocabulary import Vocabulary
-from allennlp.modules.attention import LegacyAttention
-from allennlp.modules import Attention, TextFieldEmbedder, Seq2SeqEncoder
-from allennlp.modules.similarity_functions import SimilarityFunction
+from allennlp.modules import TextFieldEmbedder
 from allennlp.models.model import Model
-from allennlp.modules.token_embedders import Embedding
 from allennlp.nn import util
-from allennlp.nn.beam_search import BeamSearch
-from allennlp.training.metrics import BLEU
 from allennlp.data.dataset_readers import DatasetReader
 from allennlp.data.dataset import Batch
+from allennlp.training.metrics.average import Average
+
+from nltk.translate.bleu_score import corpus_bleu
 
 from fairseq.models.transformer import TransformerDecoder, TransformerModel
 from fairseq.models.transformer import Embedding as FairseqEmbedding
-from fairseq.models.transformer import base_architecture, transformer_iwslt_de_en
+from fairseq.models.transformer import transformer_iwslt_de_en
 from fairseq.sequence_generator import SequenceGenerator
 
 from unsupervised_translation.modules.fseq_transformer_encoder import AllennlpTransformerEncoder
+from unsupervised_translation.fseq_wrappers.fseq_beam_search import FairseqBeamSearch
+from unsupervised_translation.fseq_wrappers.stub import ArgsStub, DictStub
 
 @Model.register("unsupervised_translation")
 class UnsupervisedTranslation(Model):
@@ -93,9 +89,8 @@ class UnsupervisedTranslation(Model):
 
         self._label_smoothing = 0.1
 
-        self._padding_index = vocab.get_token_index(DEFAULT_PADDING_TOKEN, target_namespace) 
-        self._oov_index = vocab.get_token_index(DEFAULT_OOV_TOKEN, target_namespace) 
-        self._pad_index = vocab.get_token_index(vocab._padding_token, target_namespace)  # pylint: disable=protected-access
+        self._pad_index = vocab.get_token_index(DEFAULT_PADDING_TOKEN, target_namespace)
+        self._oov_index = vocab.get_token_index(DEFAULT_OOV_TOKEN, target_namespace)
         self._start_index = self.vocab.get_token_index(START_SYMBOL, target_namespace)
         self._end_index = self.vocab.get_token_index(END_SYMBOL, target_namespace)
 
@@ -103,26 +98,13 @@ class UnsupervisedTranslation(Model):
 
         self._target_namespace = target_namespace
 
-        # We need the start symbol to provide as the input at the first timestep of decoding, and
-        # end symbol as a way to indicate the end of the decoded sequence.
         if use_bleu:
-            self._bleu = BLEU(exclude_indices={self._pad_index, self._end_index, self._start_index})
+            self._bleu = Average()
         else:
             self._bleu = None
 
-        ####################################################
-        ####################################################
-        # DEFINE FAIRSEQ ENCODER, DECODER, AND MODEL:
-        ####################################################
-        ####################################################
-
-
-        # get transformer parameters together
-        class ArgsStub:
-            def __init__(self):
-                pass
-
         args = ArgsStub()
+
         transformer_iwslt_de_en(args)
 
         # build encoder
@@ -136,46 +118,25 @@ class UnsupervisedTranslation(Model):
 
         # Dense embedding of vocab words in the target space.
         num_classes = self.vocab.get_vocab_size(self._target_namespace)
-        args.share_decoder_input_output_embed = False # TODO implement shared embeddings
+        args.share_decoder_input_output_embed = False  # TODO implement shared embeddings
 
-        # stub for useless dictionary that still has to be passed
-        class DictStub:
-            def __init__(self, num_tokens=None, pad=None, unk=None, eos=None):
-                self._num_tokens = num_tokens
-                self._pad = pad
-                self._unk = unk
-                self._eos = eos
-            
-            def pad(self):
-                return self._pad
-            
-            def unk(self):
-                return self._unk
-
-            def eos(self):
-                return self._eos
-
-            def __len__(self):
-                return self._num_tokens
-
-        src_dict, tgt_dict = DictStub(), DictStub(num_tokens=num_classes, 
-                                                  pad=self._padding_index, 
+        src_dict, tgt_dict = DictStub(), DictStub(num_tokens=num_classes,
+                                                  pad=self._pad_index,
                                                   unk=self._oov_index,
                                                   eos=self._end_index)
 
         # instantiate fairseq classes
-        emb_golden_tokens = FairseqEmbedding(num_classes, args.decoder_embed_dim, self._padding_index)
+        emb_golden_tokens = FairseqEmbedding(num_classes, args.decoder_embed_dim, self._pad_index)
 
         self._encoder = AllennlpTransformerEncoder(args, src_dict, self._source_embedder, left_pad=False)
         self._decoder = TransformerDecoder(args, tgt_dict, emb_golden_tokens, left_pad=False)
         self._model = TransformerModel(self._encoder, self._decoder)
 
-        self._sequence_generator_greedy = SequenceGenerator(tgt_dict=tgt_dict, beam_size=1, max_len_b=20)
-        self._sequence_generator_beam = SequenceGenerator(tgt_dict=tgt_dict, beam_size=7, max_len_b=20) # TODO: do not hardcode max_len_b and beam size
-
-        ####################################################
-        ####################################################
-        ####################################################
+        # TODO: do not hardcode max_len_b and beam size
+        self._sequence_generator_greedy = FairseqBeamSearch(SequenceGenerator(tgt_dict=tgt_dict, beam_size=1,
+                                                                              max_len_b=20))
+        self._sequence_generator_beam = FairseqBeamSearch(SequenceGenerator(tgt_dict=tgt_dict, beam_size=7,
+                                                                            max_len_b=20))
 
     @overrides
     def forward(self,  # type: ignore
@@ -212,29 +173,27 @@ class UnsupervisedTranslation(Model):
 
         output_dict = {}
         if mode_training:
-            if task_translation or task_denoising:
-                # regular cross-entropy loss
+
+            if task_translation:
+                loss = self._forward_seq2seq(lang_pair, source_tokens, target_tokens)
+            elif task_denoising:  # might need to split it into two blocks for interlingua loss
                 loss = self._forward_seq2seq(lang_pair, source_tokens, target_tokens)
             elif task_backtranslation:
                 # our goal is also to learn from regular cross-entropy loss, but since we do not have source tokens,
                 # we will generate them ourselves with current model
-                    langs_src = self._backtranslation_src_langs.copy()
-                    langs_src.remove(lang_tgt)
-                    bt_losses = {}
-                    for lang_src in langs_src:
-                        # TODO: require to pass target language to forward on encoder outputs
-                        # We use greedy decoder because it was shown better for backtranslation
-                        with torch.no_grad():
-                            predictions = \
-                                self._sequence_generator_greedy.generate([self._model],
-                                                                         self._prepare_fairseq_batch(target_tokens),
-                                                                         bos_token=self._start_index)
-                            predicted_tokens = self._indices_to_tokens(predictions)
-                        # print(predicted_tokens)
-                        curr_lang_pair = lang_src + "-" + lang_tgt
-                        model_input = self._prepare_batch_input(predicted_tokens, target_tokens, curr_lang_pair)
-
-                        bt_losses['bt:' + curr_lang_pair] = self._forward_seq2seq(**model_input)
+                langs_src = self._backtranslation_src_langs.copy()
+                langs_src.remove(lang_tgt)
+                bt_losses = {}
+                for lang_src in langs_src:
+                    curr_lang_pair = lang_src + "-" + lang_tgt
+                    # TODO: require to pass target language to forward on encoder outputs
+                    # We use greedy decoder because it was shown better for backtranslation
+                    with torch.no_grad():
+                        predicted_indices = self._sequence_generator_greedy.generate([self._model], target_tokens,
+                                                                                     self._end_index, self._start_index)
+                    model_input = self._strings_to_batch(self._indices_to_strings(predicted_indices), target_tokens,
+                                                         curr_lang_pair)
+                    bt_losses['bt:' + curr_lang_pair] = self._forward_seq2seq(**model_input)
             else:
                 raise ConfigurationError("No task have been detected")
 
@@ -253,20 +212,20 @@ class UnsupervisedTranslation(Model):
             output_dict["loss"] = self._coeff_translation * \
                                   self._forward_seq2seq(lang_pair, source_tokens, target_tokens)
             if self._bleu:
-                predictions = self._sequence_generator_beam.generate([self._model],
-                                                                     self._prepare_fairseq_batch(source_tokens),
-                                                                     bos_token=self._start_index)
+                predicted_indices = self._sequence_generator_beam.generate([self._model], source_tokens,
+                                                                           self._end_index, self._start_index)
+                predicted_strings = self._indices_to_strings(predicted_indices)
+                golden_strings = self._indices_to_strings(target_tokens["tokens"])
+                golden_strings = list(filter(lambda t: t != DEFAULT_PADDING_TOKEN, golden_strings))
                 # shape: (batch_size, beam_size, max_sequence_length)
-                # best_predictions = _get_best_predictions(predictions)
-                # self._bleu(best_predictions, target_tokens["tokens"])
-                output_dict["bleu"] = 0
+                self._bleu(corpus_bleu(golden_strings, predicted_strings))
 
         elif mode_prediction:
             # TODO: pass target language (in the fseq_encoder append embedded target language to the encoder out)
-            predictions = self._sequence_generator_beam.generate([self._model],
-                                                                 self._prepare_fairseq_batch(source_tokens),
-                                                                 bos_token=self._start_index)
-            output_dict["predictions"] = predictions
+            predicted_indices = self._sequence_generator_beam.generate([self._model], source_tokens,
+                                                                       self._end_index, self._start_index)
+            output_dict["predicted_indices"] = predicted_indices
+            output_dict["predicted_strings"] = self._indices_to_strings(predicted_indices)
 
         return output_dict
 
@@ -281,10 +240,19 @@ class UnsupervisedTranslation(Model):
     def _get_ce_loss(self, logits, target_tokens):
         target_mask = util.get_text_field_mask(target_tokens)
         loss = util.sequence_cross_entropy_with_logits(logits, target_tokens["tokens"], target_mask,
-                                                label_smoothing=self._label_smoothing)
+                                                       label_smoothing=self._label_smoothing)
         return loss
+
+    def _indices_to_strings(self, indices: torch.Tensor):
+        all_predicted_tokens = []
+        for hyp in indices:
+            predicted_tokens = [self.vocab.get_token_from_index(idx.item(), namespace=self._target_namespace)
+                                for idx in hyp]
+            all_predicted_tokens.append(predicted_tokens)
+        return all_predicted_tokens
         
-    def _prepare_batch_input(self, source_tokens: List[List[str]], target_tensor_dict: Dict[str, torch.Tensor], lang_pair: str):
+    def _strings_to_batch(self, source_tokens: List[List[str]], target_tensor_dict: Dict[str, torch.Tensor],
+                          lang_pair: str):
         """
         Converts list of sentences which are itself lists of strings into Batch
         suitable for passing into model's forward function.
@@ -309,48 +277,9 @@ class UnsupervisedTranslation(Model):
 
         return model_input
 
-    def _prepare_fairseq_batch(self, source_tokens: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        padding_mask = util.get_text_field_mask(source_tokens)
-        # source_tokens = source_tokens["tokens"]
-        # source_tokens, padding_mask = remove_eos_from_the_beginning(source_tokens, padding_mask)
-        lengths = util.get_lengths_from_binary_sequence_mask(padding_mask)
-        return {"net_input": {"src_tokens": source_tokens, "src_lengths": lengths}} # TODO: length are ignored even in seq generator; omit it here
-
-    @overrides
-    def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """
-        Finalize predictions.
-
-        This method overrides ``Model.decode``, which gets called after ``Model.forward``, at test
-        time, to finalize predictions. The logic for the decoder part of the encoder-decoder lives
-        within the ``forward`` method.
-
-        This method trims the output predictions to the first end symbol, replaces indices with
-        corresponding tokens, and adds a field called ``predicted_tokens`` to the ``output_dict``.
-        """
-        output_dict["predicted_tokens"] = self._indices_to_tokens(output_dict["predictions"])
-        return output_dict
-
-    def _indices_to_tokens(self, predictions: List[List[Dict[str, torch.LongTensor]]]):
-        # TODO: MAKE THIS ACCEPT NORMAL PREDICTIONS AND WRITE FUCN THAT WILL CONVERT FAIRSEQ OUT TO NORMAL ONE
-        all_predicted_tokens = []
-        for hyps in predictions:
-            best_hyp = hyps[0]
-            indices = best_hyp["tokens"]
-
-            if self._end_index in indices:
-                indices = indices[:((indices == self._end_index).nonzero())]
-
-            predicted_tokens = [self.vocab.get_token_from_index(x.item(), namespace=self._target_namespace)
-                                for x in indices]
-
-            all_predicted_tokens.append(predicted_tokens)
-
-        return all_predicted_tokens
-
     @overrides
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         all_metrics: Dict[str, float] = {}
         if self._bleu and not self.training:
-            all_metrics.update(self._bleu.get_metric(reset=reset))
+            all_metrics.update({"BLEU": self._bleu.get_metric(reset=reset)})
         return all_metrics

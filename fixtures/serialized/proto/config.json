@@ -26,6 +26,9 @@
         "en-ru": "fixtures/data/para.en-ru",
         "ru": "fixtures/data/mono.ru"
     },
+    "validation_data_path": {
+        "en-ru": "fixtures/data/para.en-ru"
+    },
     "trainer": {
         "cuda_device": -1,
         "num_epochs": 13,

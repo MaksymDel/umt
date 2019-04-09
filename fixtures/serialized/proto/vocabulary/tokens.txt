@@ -7,6 +7,9 @@ kak
 a
 na
 my
+I
+Ya
+!
 There
 are
 two
@@ -65,9 +68,6 @@ Noch
 ulitsa
 fonar
 apteka
-I
-Ya
-!
 go
 to
 school
