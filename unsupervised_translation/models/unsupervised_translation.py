@@ -25,6 +25,7 @@ from unsupervised_translation.modules.fseq_transformer_encoder import AllennlpTr
 from unsupervised_translation.fseq_wrappers.fseq_beam_search import FairseqBeamSearch
 from unsupervised_translation.fseq_wrappers.stub import ArgsStub, DictStub
 
+# TODO: get vocab namespaces right
 @Model.register("unsupervised_translation")
 class UnsupervisedTranslation(Model):
     """
@@ -91,7 +92,6 @@ class UnsupervisedTranslation(Model):
 
         self._pad_index = vocab.get_token_index(DEFAULT_PADDING_TOKEN, target_namespace)
         self._oov_index = vocab.get_token_index(DEFAULT_OOV_TOKEN, target_namespace)
-        self._start_index = self.vocab.get_token_index(START_SYMBOL, target_namespace)
         self._end_index = self.vocab.get_token_index(END_SYMBOL, target_namespace)
 
         self._reader = dataset_reader
@@ -141,18 +141,20 @@ class UnsupervisedTranslation(Model):
     @overrides
     def forward(self,  # type: ignore
                 lang_pair: List[str],
-                source_tokens: Dict[str, torch.LongTensor] = None,
-                target_tokens: Dict[str, torch.LongTensor] = None) -> Dict[str, torch.Tensor]:
+                lang1_tokens: Dict[str, torch.LongTensor] = None,
+                lang1_golden: Dict[str, torch.LongTensor] = None,
+                lang2_tokens: Dict[str, torch.LongTensor] = None,
+                lang2_golden: Dict[str, torch.LongTensor] = None) -> Dict[str, torch.Tensor]:
         # pylint: disable=arguments-differ
         """
         """
         # detect training mode and what kind of task we need to compute            
-        if target_tokens is None and source_tokens is None:
+        if lang2_tokens is None and lang1_tokens is None:
             raise ConfigurationError("source_tokens and target_tokens can not both be None")
 
         mode_training = self.training
-        mode_validation = not self.training and target_tokens is not None  # change 'target_tokens' condition
-        mode_prediction = target_tokens is None  # change 'target_tokens' condition
+        mode_validation = not self.training and lang2_tokens is not None  # change 'target_tokens' condition
+        mode_prediction = lang2_tokens is None  # change 'target_tokens' condition
 
         lang_src, lang_tgt = lang_pair[0].split('-')
 
@@ -175,9 +177,17 @@ class UnsupervisedTranslation(Model):
         if mode_training:
 
             if task_translation:
-                loss = self._forward_seq2seq(lang_pair, source_tokens, target_tokens)
+                loss = self._forward_seq2seq(lang_pair, lang1_tokens, lang2_tokens, lang2_golden)
+                if self._bleu:
+                    predicted_indices = self._sequence_generator_beam.generate([self._model], lang1_tokens,
+                                                                               self._end_index)
+                    predicted_strings = self._indices_to_strings(predicted_indices)
+                    golden_strings = self._indices_to_strings(lang2_tokens["tokens"])
+                    golden_strings = self._remove_pad_eos(golden_strings)
+                    # print(golden_strings, predicted_strings)
+                    self._bleu(corpus_bleu(golden_strings, predicted_strings))
             elif task_denoising:  # might need to split it into two blocks for interlingua loss
-                loss = self._forward_seq2seq(lang_pair, source_tokens, target_tokens)
+                loss = self._forward_seq2seq(lang_pair, lang1_tokens, lang2_tokens, lang2_golden)
             elif task_backtranslation:
                 # our goal is also to learn from regular cross-entropy loss, but since we do not have source tokens,
                 # we will generate them ourselves with current model
@@ -189,10 +199,10 @@ class UnsupervisedTranslation(Model):
                     # TODO: require to pass target language to forward on encoder outputs
                     # We use greedy decoder because it was shown better for backtranslation
                     with torch.no_grad():
-                        predicted_indices = self._sequence_generator_greedy.generate([self._model], target_tokens,
-                                                                                     self._end_index, self._start_index)
-                    model_input = self._strings_to_batch(self._indices_to_strings(predicted_indices), target_tokens,
-                                                         curr_lang_pair)
+                        predicted_indices = self._sequence_generator_greedy.generate([self._model], lang2_tokens,
+                                                                                     self._end_index)
+                    model_input = self._strings_to_batch(self._indices_to_strings(predicted_indices), lang2_tokens,
+                                                         lang2_golden, curr_lang_pair)
                     bt_losses['bt:' + curr_lang_pair] = self._forward_seq2seq(**model_input)
             else:
                 raise ConfigurationError("No task have been detected")
@@ -210,36 +220,52 @@ class UnsupervisedTranslation(Model):
 
         elif mode_validation:
             output_dict["loss"] = self._coeff_translation * \
-                                  self._forward_seq2seq(lang_pair, source_tokens, target_tokens)
+                                  self._forward_seq2seq(lang_pair, lang1_tokens, lang2_tokens, lang2_golden)
             if self._bleu:
-                predicted_indices = self._sequence_generator_beam.generate([self._model], source_tokens,
-                                                                           self._end_index, self._start_index)
+                predicted_indices = self._sequence_generator_beam.generate([self._model], lang1_tokens,
+                                                                           self._end_index)
                 predicted_strings = self._indices_to_strings(predicted_indices)
-                golden_strings = self._indices_to_strings(target_tokens["tokens"])
-                golden_strings = list(filter(lambda t: t != DEFAULT_PADDING_TOKEN, golden_strings))
-                # shape: (batch_size, beam_size, max_sequence_length)
+                golden_strings = self._indices_to_strings(lang2_tokens["tokens"])
+                golden_strings = self._remove_pad_eos(golden_strings)
+                print(golden_strings, predicted_strings)
                 self._bleu(corpus_bleu(golden_strings, predicted_strings))
 
         elif mode_prediction:
             # TODO: pass target language (in the fseq_encoder append embedded target language to the encoder out)
-            predicted_indices = self._sequence_generator_beam.generate([self._model], source_tokens,
-                                                                       self._end_index, self._start_index)
+            predicted_indices = self._sequence_generator_beam.generate([self._model], lang1_tokens,
+                                                                       self._end_index)
             output_dict["predicted_indices"] = predicted_indices
             output_dict["predicted_strings"] = self._indices_to_strings(predicted_indices)
 
         return output_dict
 
+    def _remove_pad_eos(self, golden_strings):
+        tmp = []
+        for x in golden_strings:
+            tmp.append(list(filter(lambda a: a != DEFAULT_PADDING_TOKEN and a != END_SYMBOL, x)))
+        return tmp
+
+    def _convert_to_sentences(self, golden_strings, predicted_strings):
+        golden_strings_nopad = []
+        for s in golden_strings:
+            s_nopad = list(filter(lambda t: t != DEFAULT_PADDING_TOKEN, s))
+            s_nopad = " ".join(s_nopad)
+            golden_strings_nopad.append(s_nopad)
+        predicted_strings = [" ".join(s) for s in predicted_strings]
+        return golden_strings_nopad, predicted_strings
+
     def _forward_seq2seq(self, lang_pair: List[str],
                          source_tokens: Dict[str, torch.LongTensor],
-                         target_tokens: Dict[str, torch.LongTensor]) -> Dict[str, torch.Tensor]:
+                         target_tokens: Dict[str, torch.LongTensor],
+                         target_golden: Dict[str, torch.LongTensor]) -> Dict[str, torch.Tensor]:
         encoder_out = self._encoder.forward(source_tokens, None)
         logits, _ = self._decoder.forward(target_tokens["tokens"], encoder_out)
-        loss = self._get_ce_loss(logits, target_tokens)
+        loss = self._get_ce_loss(logits, target_golden)
         return loss
 
-    def _get_ce_loss(self, logits, target_tokens):
-        target_mask = util.get_text_field_mask(target_tokens)
-        loss = util.sequence_cross_entropy_with_logits(logits, target_tokens["tokens"], target_mask,
+    def _get_ce_loss(self, logits, golden):
+        target_mask = util.get_text_field_mask(golden)
+        loss = util.sequence_cross_entropy_with_logits(logits, golden["golden_tokens"], target_mask,
                                                        label_smoothing=self._label_smoothing)
         return loss
 
@@ -251,8 +277,8 @@ class UnsupervisedTranslation(Model):
             all_predicted_tokens.append(predicted_tokens)
         return all_predicted_tokens
         
-    def _strings_to_batch(self, source_tokens: List[List[str]], target_tensor_dict: Dict[str, torch.Tensor],
-                          lang_pair: str):
+    def _strings_to_batch(self, source_tokens: List[List[str]], target_tokens: Dict[str, torch.Tensor],
+                          target_golden: Dict[str, torch.Tensor], lang_pair: str):
         """
         Converts list of sentences which are itself lists of strings into Batch
         suitable for passing into model's forward function.
@@ -271,8 +297,9 @@ class UnsupervisedTranslation(Model):
         source_batch = Batch(instances)
         source_batch.index_instances(self.vocab)
         source_batch = source_batch.as_tensor_dict()
-        model_input = {"source_tokens": source_batch["source_tokens"],
-                       "target_tokens": target_tensor_dict,
+        model_input = {"source_tokens": source_batch["tokens"],
+                       "target_golden": target_golden,
+                       "target_tokens": target_tokens,
                        "lang_pair": lang_pairs}
 
         return model_input

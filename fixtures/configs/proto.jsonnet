@@ -4,8 +4,10 @@ local Reader() = {
 
 {
   // "train_data_path": {"en": "fixtures/data/mono.en", "ru": "fixtures/data/mono.ru", "en-ru": "fixtures/data/para.en-ru"},
-  "train_data_path": {"en-ru": "fixtures/data/para.en-ru"},
-  "validation_data_path": {"en-ru": "fixtures/data/para.en-ru"},
+  // "train_data_path": {"en-ru": "fixtures/data/para.en-ru"},
+  "train_data_path": {"en-ru": "fixtures/data/dummy.en-ru"},
+  // "validation_data_path": {"en-ru": "fixtures/data/para.en-ru"},
+  "validation_data_path": {"en-ru": "fixtures/data/dummy.en-ru"},
   "dataset_reader": Reader(),
 
   "model": {
@@ -15,7 +17,7 @@ local Reader() = {
         "token_embedders": {
           "tokens": {
             "type": "embedding",
-            "embedding_dim": 300
+            "embedding_dim": 512
           }
         }
       },
@@ -28,13 +30,13 @@ local Reader() = {
     },
     "trainer": {
       "num_epochs": 130,
-      "patience": 10,
+      "patience": 50,
       "cuda_device": -1,
       // "grad_clipping": 5.0,
       "validation_metric": "+BLEU",
       "optimizer": {
         "type": "adam",
-        "lr": "0.1"
+        "lr": "0.01"
       }
     }
   }

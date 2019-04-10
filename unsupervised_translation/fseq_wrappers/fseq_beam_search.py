@@ -29,5 +29,5 @@ class FairseqBeamSearch:
         for hyps in x:
             best_hyp = hyps[0]
             indices = best_hyp["tokens"]
-            all_indices.append(indices)
+            all_indices.append(indices[:-1])  # remove eos from output
         return all_indices

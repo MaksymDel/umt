@@ -26,6 +26,24 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 torch.manual_seed(1)
 
+# TODO: find a better place for this
+golden_tokenizer = WordTokenizer(word_splitter=SimpleWordSplitter())
+golden_token_indexers = {"golden_tokens": SingleIdTokenIndexer(namespace="tokens")}
+
+
+def string_to_fields(string: str, tokenizer: Tokenizer, token_indexers: Dict[str, TokenIndexer]):
+    tokenized_string = tokenizer.tokenize(string)
+    tokenized_string.insert(0, Token(END_SYMBOL))
+    field = TextField(tokenized_string, token_indexers)
+
+    # TODO: always use single id token indexer and tokenizer default/bpe cause we will have bert/elmo passed to main str
+    tokenized_golden_string = golden_tokenizer.tokenize(string)
+    tokenized_golden_string.append(Token(END_SYMBOL))  # with eos at the end for loss compute
+    field_golden = TextField(tokenized_golden_string, golden_token_indexers)
+
+    return field, field_golden
+
+
 @DatasetReader.register("unsupervised_translation")
 class UnsupervisedTranslationDatasetsReader(DatasetReader):
     """
@@ -38,12 +56,13 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
         self._undefined_lang_id = "xx"
         self._tokenizer = tokenizer or WordTokenizer(word_splitter=SimpleWordSplitter())
         self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
-        self._denoising_dataset_reader = DenoisingAutoencoderDatasetReader(tokenizer=tokenizer,
-                                                                           token_indexers=token_indexers, lazy=lazy)
+        self._denoising_dataset_reader = ParallelDatasetReader(lang1_tokenizer=tokenizer,
+                                                               lang1_token_indexers=token_indexers,
+                                                               lazy=lazy, denoising=True)
         self._backtranslation_dataset_reader = BacktranslationDatasetReader(tokenizer=tokenizer,
                                                                             token_indexers=token_indexers, lazy=lazy)
-        self._parallel_dataset_reader = ParallelDatasetReader(source_tokenizer=tokenizer,
-                                                              source_token_indexers=token_indexers, lazy=lazy)
+        self._parallel_dataset_reader = ParallelDatasetReader(lang1_tokenizer=tokenizer,
+                                                              lang1_token_indexers=token_indexers, lazy=lazy)
 
         self._mingler = RoundRobinMingler(dataset_name_field="lang_pair", take_at_a_time=1)
 
@@ -71,39 +90,40 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
 
 
     @overrides
-    def text_to_instance(self, string: str, target_lang: str) -> Instance:  # type: ignore
+    def text_to_instance(self, string: str, lang2_lang: str) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
         """
         Used in predicition time
         """
-        lang_pair = self._undefined_lang_id + '-' + target_lang
+        lang_pair = self._undefined_lang_id + '-' + lang2_lang
         tokenized_string = self._tokenizer.tokenize(string)
         string_field = TextField(tokenized_string, self._token_indexers)
-        return Instance({self._mingler.dataset_name_field: MetadataField(lang_pair), 'source_tokens': string_field})
+        return Instance({self._mingler.dataset_name_field: MetadataField(lang_pair), 'lang1_tokens': string_field})
 
     def string_to_instance(self, string: str) -> Instance:
         """
         Used for backtranslation
         """
-        tokenized_string = self._tokenizer.tokenize(string)
-        string_field = TextField(tokenized_string, self._token_indexers)
-        return Instance({'source_tokens': string_field})
+        string_field, golden_field = string_to_fields(string, self._tokenizer, self._token_indexers)
+        return Instance({'tokens': string_field, 'golden': golden_field})
 
 
 class ParallelDatasetReader(DatasetReader):
     """
     """
     def __init__(self,
-                 source_tokenizer: Tokenizer = None,
-                 target_tokenizer: Tokenizer = None,
-                 source_token_indexers: Dict[str, TokenIndexer] = None,
-                 target_token_indexers: Dict[str, TokenIndexer] = None,
-                 lazy: bool = False) -> None:
+                 lang1_tokenizer: Tokenizer = None,
+                 lang2_tokenizer: Tokenizer = None,
+                 lang1_token_indexers: Dict[str, TokenIndexer] = None,
+                 lang2_token_indexers: Dict[str, TokenIndexer] = None,
+                 lazy: bool = False,
+                 denoising=False) -> None:
         super().__init__(lazy)
-        self._source_tokenizer = source_tokenizer or WordTokenizer(word_splitter=SimpleWordSplitter())
-        self._target_tokenizer = target_tokenizer or self._source_tokenizer
-        self._source_token_indexers = source_token_indexers or {"tokens": SingleIdTokenIndexer()}
-        self._target_token_indexers = target_token_indexers or self._source_token_indexers
+        self._lang1_tokenizer = lang1_tokenizer or WordTokenizer(word_splitter=SimpleWordSplitter())
+        self._lang2_tokenizer = lang2_tokenizer or self._lang1_tokenizer
+        self._lang1_token_indexers = lang1_token_indexers or {"tokens": SingleIdTokenIndexer()}
+        self._lang2_token_indexers = lang2_token_indexers or self._lang1_token_indexers
+        self._denoising = denoising
 
     @overrides
     def _read(self, file_path):
@@ -116,59 +136,32 @@ class ParallelDatasetReader(DatasetReader):
                     continue
 
                 line_parts = line.split('\t')
-                if len(line_parts) != 2:
-                    raise ConfigurationError("Invalid line format: %s (line number %d)" % (line, line_num + 1))
-                source_sequence, target_sequence = line_parts
-                yield self.text_to_instance(source_sequence, target_sequence)
+                if not self._denoising:
+                    if len(line_parts) != 2:
+                        raise ConfigurationError("Invalid line format: %s (line number %d)" % (line, line_num + 1))
+                    lang1_sequence, lang2_sequence = line_parts
+                    yield self.text_to_instance(lang1_sequence, lang2_sequence)
+                else:
+                    if len(line_parts) != 1:
+                        raise ConfigurationError("Invalid line format: %s (line number %d)" % (line, line_num + 1))
+                    string = line[0]
+                    noised = self._add_noise(string)
+                    yield self.text_to_instance(noised, string)
+
 
     @overrides
-    def text_to_instance(self, source_string: str, target_string: str = None) -> Instance:  # type: ignore
+    def text_to_instance(self, lang1_string: str, lang2_string: str = None) -> Instance:  # type: ignore
         # pylint: disable=arguments-differ
-        tokenized_source = self._source_tokenizer.tokenize(source_string)
-        source_field = TextField(tokenized_source, self._source_token_indexers)
-        if target_string is not None:
-            tokenized_target = self._target_tokenizer.tokenize(target_string)
-            target_field = TextField(tokenized_target, self._target_token_indexers)
-            return Instance({"source_tokens": source_field, "target_tokens": target_field})
+        lang1_field, lang1_golden = string_to_fields(lang1_string, self._lang1_tokenizer, self._lang1_token_indexers)
+        if lang2_string is not None:
+            lang2_field, lang2_golden = string_to_fields(lang2_string, self._lang2_tokenizer, self._lang2_token_indexers)
+            return Instance({"lang1_tokens": lang1_field, "lang2_tokens": lang2_field,
+                             'lang1_golden': lang1_golden, "lang2_golden": lang2_golden})
         else:
-            return Instance({'source_tokens': source_field})
+            return Instance({'lang1_tokens': lang1_field, 'lang1_golden': lang1_golden})
 
-
-class DenoisingAutoencoderDatasetReader(DatasetReader):
-    """
-    """
-    def __init__(self,
-                 tokenizer: Tokenizer = None,
-                 token_indexers: Dict[str, TokenIndexer] = None,
-                 lazy: bool = False) -> None:
-        super().__init__(lazy)
-        self._tokenizer = tokenizer or WordTokenizer(word_splitter=SimpleWordSplitter())
-        self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
-
-    @overrides
-    def _read(self, file_path):
-        with open(cached_path(file_path), "r") as data_file:
-            logger.info("Reading instances from lines in file at: %s", file_path)
-            for line_num, line in enumerate(data_file):
-                line = line.strip("\n")
-
-                if not line:
-                    continue
-
-                yield self.text_to_instance(line)
-
-    def _add_noise(self, sentence):
-        # TODO: implement noising
+    def _add_noise(self, sentence: str):
         return sentence
-
-    @overrides
-    def text_to_instance(self, string: str) -> Instance:  # type: ignore
-        # pylint: disable=arguments-differ
-        tokenized_string = self._tokenizer.tokenize(string)
-        noised_string = self._add_noise(tokenized_string)
-        string_field = TextField(tokenized_string, self._token_indexers)
-        noised_string_filed = TextField(noised_string, self._token_indexers)
-        return Instance({'source_tokens': noised_string_filed, 'target_tokens': string_field})
 
 
 class BacktranslationDatasetReader(DatasetReader):
@@ -196,10 +189,8 @@ class BacktranslationDatasetReader(DatasetReader):
 
     @overrides
     def text_to_instance(self, string: str) -> Instance:  # type: ignore
-        # pylint: disable=arguments-differ
-        tokenized_string = self._tokenizer.tokenize(string)
-        string_field = TextField(tokenized_string, self._token_indexers)
-        return Instance({'target_tokens': string_field})
+        lang2_field, lang2_golden = string_to_fields(string, self._tokenizer, self._token_indexers)
+        return Instance({'lang2_tokens': lang2_field, 'lang2_golden': lang2_golden})
 
 
 class DatasetMingler(Registrable):
