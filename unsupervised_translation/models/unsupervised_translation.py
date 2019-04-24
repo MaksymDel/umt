@@ -16,12 +16,11 @@ from allennlp.training.metrics.average import Average
 
 from nltk.translate.bleu_score import corpus_bleu
 
-from fairseq.models.transformer import TransformerDecoder, TransformerModel
+from fairseq.models.transformer import TransformerDecoder, TransformerModel, TransformerEncoder
 from fairseq.models.transformer import Embedding as FairseqEmbedding
 from fairseq.models.transformer import transformer_iwslt_de_en
 from fairseq.sequence_generator import SequenceGenerator
 
-from unsupervised_translation.modules.fseq_transformer_encoder import AllennlpTransformerEncoder
 from unsupervised_translation.fseq_wrappers.fseq_beam_search import FairseqBeamSearch
 from unsupervised_translation.fseq_wrappers.stub import ArgsStub, DictStub
 
@@ -79,9 +78,12 @@ class UnsupervisedTranslation(Model):
                  vocab: Vocabulary,
                  dataset_reader: DatasetReader,
                  source_embedder: TextFieldEmbedder,
-                 target_namespace: str = "tokens",
+                 lang2_namespace: str = "tokens",
                  use_bleu: bool = True) -> None:
         super().__init__(vocab)
+        self._lang1_namespace = lang2_namespace  # TODO: DO NOT HARDCODE IT
+        self._lang2_namespace = lang2_namespace
+
         # TODO: do not hardcore this
         self._backtranslation_src_langs = ["en", "ru"]
         self._coeff_denoising = 1
@@ -90,13 +92,15 @@ class UnsupervisedTranslation(Model):
 
         self._label_smoothing = 0.1
 
-        self._pad_index = vocab.get_token_index(DEFAULT_PADDING_TOKEN, target_namespace)
-        self._oov_index = vocab.get_token_index(DEFAULT_OOV_TOKEN, target_namespace)
-        self._end_index = self.vocab.get_token_index(END_SYMBOL, target_namespace)
+        self._pad_index_lang1 = vocab.get_token_index(DEFAULT_PADDING_TOKEN, self._lang1_namespace)
+        self._oov_index_lang1 = vocab.get_token_index(DEFAULT_OOV_TOKEN, self._lang1_namespace)
+        self._end_index_lang1 = self.vocab.get_token_index(END_SYMBOL, self._lang1_namespace)
+
+        self._pad_index_lang2 = vocab.get_token_index(DEFAULT_PADDING_TOKEN, self._lang2_namespace)
+        self._oov_index_lang2 = vocab.get_token_index(DEFAULT_OOV_TOKEN, self._lang2_namespace)
+        self._end_index_lang2 = self.vocab.get_token_index(END_SYMBOL, self._lang2_namespace)
 
         self._reader = dataset_reader
-
-        self._target_namespace = target_namespace
 
         if use_bleu:
             self._bleu = Average()
@@ -117,25 +121,32 @@ class UnsupervisedTranslation(Model):
         self._source_embedder = source_embedder
 
         # Dense embedding of vocab words in the target space.
-        num_classes = self.vocab.get_vocab_size(self._target_namespace)
+        num_tokens_lang1 = self.vocab.get_vocab_size(self._lang1_namespace)
+        num_tokens_lang2 = self.vocab.get_vocab_size(self._lang2_namespace)
+
         args.share_decoder_input_output_embed = False  # TODO implement shared embeddings
 
-        src_dict, tgt_dict = DictStub(), DictStub(num_tokens=num_classes,
-                                                  pad=self._pad_index,
-                                                  unk=self._oov_index,
-                                                  eos=self._end_index)
+        lang1_dict = DictStub(num_tokens=num_tokens_lang1,
+                              pad=self._pad_index_lang1,
+                              unk=self._oov_index_lang1,
+                              eos=self._end_index_lang1)
+
+        lang2_dict = DictStub(num_tokens=num_tokens_lang2,
+                              pad=self._pad_index_lang2,
+                              unk=self._oov_index_lang2,
+                              eos=self._end_index_lang2)
 
         # instantiate fairseq classes
-        emb_golden_tokens = FairseqEmbedding(num_classes, args.decoder_embed_dim, self._pad_index)
+        emb_golden_tokens = FairseqEmbedding(num_tokens_lang2, args.decoder_embed_dim, self._pad_index_lang2)
 
-        self._encoder = AllennlpTransformerEncoder(args, src_dict, self._source_embedder, left_pad=False)
-        self._decoder = TransformerDecoder(args, tgt_dict, emb_golden_tokens, left_pad=False)
+        self._encoder = TransformerEncoder(args, lang1_dict, self._source_embedder)
+        self._decoder = TransformerDecoder(args, lang2_dict, emb_golden_tokens)
         self._model = TransformerModel(self._encoder, self._decoder)
 
         # TODO: do not hardcode max_len_b and beam size
-        self._sequence_generator_greedy = FairseqBeamSearch(SequenceGenerator(tgt_dict=tgt_dict, beam_size=1,
+        self._sequence_generator_greedy = FairseqBeamSearch(SequenceGenerator(tgt_dict=lang2_dict, beam_size=1,
                                                                               max_len_b=20))
-        self._sequence_generator_beam = FairseqBeamSearch(SequenceGenerator(tgt_dict=tgt_dict, beam_size=7,
+        self._sequence_generator_beam = FairseqBeamSearch(SequenceGenerator(tgt_dict=lang2_dict, beam_size=7,
                                                                             max_len_b=20))
 
     @overrides
@@ -179,8 +190,10 @@ class UnsupervisedTranslation(Model):
             if task_translation:
                 loss = self._forward_seq2seq(lang_pair, lang1_tokens, lang2_tokens, lang2_golden)
                 if self._bleu:
-                    predicted_indices = self._sequence_generator_beam.generate([self._model], lang1_tokens,
-                                                                               self._end_index)
+                    predicted_indices = self._sequence_generator_beam.generate([self._model],
+                                                                               lang1_tokens,
+                                                                               self._get_true_pad_mask(lang1_tokens),
+                                                                               self._end_index_lang2)
                     predicted_strings = self._indices_to_strings(predicted_indices)
                     golden_strings = self._indices_to_strings(lang2_tokens["tokens"])
                     golden_strings = self._remove_pad_eos(golden_strings)
@@ -199,8 +212,8 @@ class UnsupervisedTranslation(Model):
                     # TODO: require to pass target language to forward on encoder outputs
                     # We use greedy decoder because it was shown better for backtranslation
                     with torch.no_grad():
-                        predicted_indices = self._sequence_generator_greedy.generate([self._model], lang2_tokens,
-                                                                                     self._end_index)
+                        predicted_indices = self._sequence_generator_greedy.generate(
+                            [self._model], lang2_tokens, self._get_true_pad_mask(lang2_tokens), self._end_index_lang2)
                     model_input = self._strings_to_batch(self._indices_to_strings(predicted_indices), lang2_tokens,
                                                          lang2_golden, curr_lang_pair)
                     bt_losses['bt:' + curr_lang_pair] = self._forward_seq2seq(**model_input)
@@ -222,8 +235,10 @@ class UnsupervisedTranslation(Model):
             output_dict["loss"] = self._coeff_translation * \
                                   self._forward_seq2seq(lang_pair, lang1_tokens, lang2_tokens, lang2_golden)
             if self._bleu:
-                predicted_indices = self._sequence_generator_beam.generate([self._model], lang1_tokens,
-                                                                           self._end_index)
+                predicted_indices = self._sequence_generator_greedy.generate([self._model],
+                                                                           lang1_tokens,
+                                                                           self._get_true_pad_mask(lang1_tokens),
+                                                                           self._end_index_lang2)
                 predicted_strings = self._indices_to_strings(predicted_indices)
                 golden_strings = self._indices_to_strings(lang2_tokens["tokens"])
                 golden_strings = self._remove_pad_eos(golden_strings)
@@ -232,12 +247,19 @@ class UnsupervisedTranslation(Model):
 
         elif mode_prediction:
             # TODO: pass target language (in the fseq_encoder append embedded target language to the encoder out)
-            predicted_indices = self._sequence_generator_beam.generate([self._model], lang1_tokens,
-                                                                       self._end_index)
+            predicted_indices = self._sequence_generator_beam.generate([self._model],
+                                                                       lang1_tokens,
+                                                                       self._get_true_pad_mask(lang1_tokens),
+                                                                       self._end_index_lang2)
             output_dict["predicted_indices"] = predicted_indices
             output_dict["predicted_strings"] = self._indices_to_strings(predicted_indices)
 
         return output_dict
+
+    def _get_true_pad_mask(self, indexed_input):
+        mask = util.get_text_field_mask(indexed_input)
+        # TODO: account for cases when text field mask doesn't work, like BERT
+        return mask
 
     def _remove_pad_eos(self, golden_strings):
         tmp = []
@@ -258,7 +280,8 @@ class UnsupervisedTranslation(Model):
                          source_tokens: Dict[str, torch.LongTensor],
                          target_tokens: Dict[str, torch.LongTensor],
                          target_golden: Dict[str, torch.LongTensor]) -> Dict[str, torch.Tensor]:
-        encoder_out = self._encoder.forward(source_tokens, None)
+        source_tokens_padding_mask = self._get_true_pad_mask(source_tokens)
+        encoder_out = self._encoder.forward(source_tokens, source_tokens_padding_mask)
         logits, _ = self._decoder.forward(target_tokens["tokens"], encoder_out)
         loss = self._get_ce_loss(logits, target_golden)
         return loss
@@ -272,7 +295,7 @@ class UnsupervisedTranslation(Model):
     def _indices_to_strings(self, indices: torch.Tensor):
         all_predicted_tokens = []
         for hyp in indices:
-            predicted_tokens = [self.vocab.get_token_from_index(idx.item(), namespace=self._target_namespace)
+            predicted_tokens = [self.vocab.get_token_from_index(idx.item(), namespace=self._lang2_namespace)
                                 for idx in hyp]
             all_predicted_tokens.append(predicted_tokens)
         return all_predicted_tokens
