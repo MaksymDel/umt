@@ -11,22 +11,3 @@ allennlp predict \
     fixtures/serialized/proto/model.tar.gz --include-package unsupervised_translation - `
 
 
-
-~~TODO1: separate all this stuff to different files and stick to the default trainer and config~~
-
-~~TODO2: use jsonnet config to pass dataset reader to both model and train command~~
-
-~~TODO3: during backtranslation, first greedly backtranslate with torch.not_grad()~~
-
-~~TODO4: then convert output into list of instances into "Batch" into tensor_dict
-
-~~TODO5: call model forward on this tensor_dict and get gradients
-
-TODO6: then repeat for other languages (for loop), but reuse the same variables to save GPU
-memory
-
-~~TODO7: finally refactor to get ready for transformers
-
-~~TODO8: use fairseq transformer
-
-TODO9: work out bos/eos symbols with regard to seqgen

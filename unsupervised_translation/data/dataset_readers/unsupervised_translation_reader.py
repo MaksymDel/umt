@@ -49,9 +49,14 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
     """
     """
     def __init__(self,
+                 langs_list: List[str],
+                 ae_steps: List[str] = None,
+                 bt_steps: List[str] = None,
+                 para_steps: List[str] = None,
                  tokenizer: Tokenizer = None,
                  token_indexers: Dict[str, TokenIndexer] = None,
-                 lazy: bool = False) -> None:
+                 lazy: bool = False
+                 ) -> None:
         super().__init__(lazy)
         self._undefined_lang_id = "xx"
         self._tokenizer = tokenizer or WordTokenizer(word_splitter=SimpleWordSplitter())
@@ -66,27 +71,55 @@ class UnsupervisedTranslationDatasetsReader(DatasetReader):
 
         self._mingler = RoundRobinMingler(dataset_name_field="lang_pair", take_at_a_time=1)
 
+        self._langs_list = langs_list
+        self._ae_steps = ae_steps
+        self._bt_steps = bt_steps
+        self._para_steps = para_steps
+
     @overrides
-    def _read(self, file_paths: Dict[str, str]):
-        if type(file_paths) == str:  # if we ese allennlp evaluate, we pass the file paths dict in the form of a string
-            file_paths = json.loads(file_paths)
-        else:
-            file_paths = dict(file_paths)
+    def _read(self, file_path):
+        dir_path = file_path
+        filenames = os.listdir(dir_path)
+        filenames = [dir_path+f for f in filenames]
+        print(filenames)
+
+        para_filenames = []
+        for para_step in self._para_steps:
+            for filename in filenames:
+                if filename.endswith('.' + para_step):
+                    para_filenames.append(filename)
+        assert len(para_filenames) == len(self._para_steps)
+
+        ae_filenames = []
+        for ae_step in self._ae_steps:
+            for filename in filenames:
+                if filename.endswith('.' + ae_step):
+                    ae_filenames.append(filename)
+        assert len(ae_filenames) == len(self._ae_steps)
+
+        bt_filenames = []
+        for bt_step in self._bt_steps:
+            for filename in filenames:
+                if filename.endswith("." + bt_step):
+                    bt_filenames.append(filename)
+        assert len(bt_filenames) == len(self._bt_steps)
 
         datasets = {}
-        for lang_code, path in file_paths.items():
-            if len(lang_code.split('-')) == 1:
-                lang_pair = lang_code + "-" + lang_code # 'en' becomes -> 'en-en' for consistancy. (denoising)
-                datasets[lang_pair] = self._denoising_dataset_reader._read(path)
+        for lang_pair_code, filename in zip(self._para_steps, para_filenames):
+            lang_pair = lang_pair_code
+            datasets[lang_pair] = self._parallel_dataset_reader._read(filename)
 
-                lang_pair = self._undefined_lang_id + "-" + lang_code  # this means backtranslation examples
-                datasets[lang_pair] = self._backtranslation_dataset_reader._read(path)
+        for lang_code, filename in zip(self._ae_steps, ae_filenames):
+            lang_pair = lang_code + "-" + lang_code  # 'en' becomes -> 'en-en' for consistancy. (denoising)
+            datasets[lang_pair] = self._denoising_dataset_reader._read(filename)
 
-            elif len(lang_code.split('-')) == 2:
-                lang_pair = lang_code
-                datasets[lang_pair] = self._parallel_dataset_reader._read(path)
+        for lang_code, filename in zip(self._bt_steps, bt_filenames):
+            lang_pair = self._undefined_lang_id + "-" + lang_code  # this means backtranslation examples
+            datasets[lang_pair] = self._backtranslation_dataset_reader._read(filename)
 
         return self._mingler.mingle(datasets=datasets)
+
+
 
 
     @overrides

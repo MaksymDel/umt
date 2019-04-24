@@ -21,7 +21,7 @@ from fairseq.models.transformer import Embedding as FairseqEmbedding
 from fairseq.models.transformer import transformer_iwslt_de_en
 from fairseq.sequence_generator import SequenceGenerator
 
-from unsupervised_translation.fseq_wrappers.fseq_beam_search import FairseqBeamSearch
+from unsupervised_translation.fseq_wrappers.fseq_beam_search import FairseqBeamSearchWrapper
 from unsupervised_translation.fseq_wrappers.stub import ArgsStub, DictStub
 
 # TODO: get vocab namespaces right
@@ -101,6 +101,10 @@ class UnsupervisedTranslation(Model):
         self._end_index_lang2 = self.vocab.get_token_index(END_SYMBOL, self._lang2_namespace)
 
         self._reader = dataset_reader
+        self._langs_list = self._reader._langs_list
+        self._ae_steps = self._reader._ae_steps
+        self._bt_steps = self._reader._bt_steps
+        self._para_steps = self._reader._para_steps
 
         if use_bleu:
             self._bleu = Average()
@@ -144,10 +148,10 @@ class UnsupervisedTranslation(Model):
         self._model = TransformerModel(self._encoder, self._decoder)
 
         # TODO: do not hardcode max_len_b and beam size
-        self._sequence_generator_greedy = FairseqBeamSearch(SequenceGenerator(tgt_dict=lang2_dict, beam_size=1,
-                                                                              max_len_b=20))
-        self._sequence_generator_beam = FairseqBeamSearch(SequenceGenerator(tgt_dict=lang2_dict, beam_size=7,
-                                                                            max_len_b=20))
+        self._sequence_generator_greedy = FairseqBeamSearchWrapper(SequenceGenerator(tgt_dict=lang2_dict, beam_size=1,
+                                                                                     max_len_b=20))
+        self._sequence_generator_beam = FairseqBeamSearchWrapper(SequenceGenerator(tgt_dict=lang2_dict, beam_size=7,
+                                                                                   max_len_b=20))
 
     @overrides
     def forward(self,  # type: ignore

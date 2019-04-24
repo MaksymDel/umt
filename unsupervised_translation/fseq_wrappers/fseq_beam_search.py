@@ -5,7 +5,7 @@ from fairseq.models import FairseqModel
 from allennlp.nn import util
 
 
-class FairseqBeamSearch:
+class FairseqBeamSearchWrapper:
     def __init__(self, sequence_generator: SequenceGenerator):
         self._sequence_generator = sequence_generator
 
